@@ -363,6 +363,9 @@ class Installer:
 
         return pkginfo.get_url(comp)
 
+    def is_busy(self):
+        return len(self.tasks.keys()) > 0
+
     def task_running(self, task):
         """
         Returns whether a given task is currently executing.

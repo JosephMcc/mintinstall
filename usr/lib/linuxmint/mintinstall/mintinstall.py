@@ -1045,6 +1045,17 @@ class Application(Gtk.Application):
             print(output)
 
     def close_application(self, window, event=None):
+        if self.installer.is_busy():
+            dialog = Gtk.MessageDialog(self.main_window,
+                                       Gtk.DialogFlags.MODAL,
+                                       Gtk.MessageType.WARNING,
+                                       Gtk.ButtonsType.YES_NO,
+                                       _("There are currently active operations.  Are you sure you want to quit?"))
+            res = dialog.run()
+            dialog.destroy()
+            if res == Gtk.ResponseType.NO:
+                return True
+
         # Not happy with Python when it comes to closing threads, so here's a radical method to get what we want.
         os.system("kill -9 %s &" % os.getpid())
 
