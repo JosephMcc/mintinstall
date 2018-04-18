@@ -366,6 +366,17 @@ class Installer:
     def is_busy(self):
         return len(self.tasks.keys()) > 0
 
+    def get_task_count(self):
+        return len(self.tasks.keys())
+
+    def get_active_pkginfos(self):
+        pkginfos = []
+
+        for pkg_hash in self.tasks.keys():
+            pkginfos.append(self.tasks[pkg_hash].pkginfo)
+
+        return pkginfos
+
     def task_running(self, task):
         """
         Returns whether a given task is currently executing.

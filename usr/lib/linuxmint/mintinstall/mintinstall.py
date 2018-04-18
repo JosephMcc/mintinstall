@@ -514,6 +514,9 @@ class Application(Gtk.Application):
         self.progress_box = self.builder.get_object("progress_box")
         self.action_button = self.builder.get_object("action_button")
         self.launch_button = self.builder.get_object("launch_button")
+        self.active_tasks_button = self.builder.get_object("active_tasks_button")
+        self.active_tasks_spinner = self.builder.get_object("active_tasks_spinner")
+        self.no_packages_found_label = self.builder.get_object("no_packages_found_label")
 
         self.progress_label = DottedProgressLabel()
         self.progress_box.pack_start(self.progress_label, False, False, 0)
@@ -561,7 +564,7 @@ class Application(Gtk.Application):
         submenu.append(about_menuitem)
 
         menu_button = self.builder.get_object("menu_button")
-        menu_button.set_popup(submenu)
+        menu_button.connect("clicked", self.on_menu_button_clicked, submenu)
 
         self.flowbox_applications = Gtk.FlowBox()
         self.flowbox_applications.set_margin_start(6)
@@ -592,6 +595,9 @@ class Application(Gtk.Application):
         self.subsearch_toggle = self.builder.get_object("subsearch_toggle")
         self.subsearch_toggle.set_active(self.settings.get_boolean(SEARCH_IN_CATEGORY))
         self.subsearch_toggle.connect("toggled", self.on_subsearch_toggled)
+
+        self.active_tasks_button.connect("clicked", self.on_active_tasks_button_clicked)
+        self.update_activity_widgets()
 
         self.page_stack = self.builder.get_object("page_stack")
         self.page_stack.set_visible_child_name(starting_page)
@@ -815,7 +821,26 @@ class Application(Gtk.Application):
         visible = self.current_category != None and self.page_stack.get_visible_child_name() == self.PAGE_LIST
         self.subsearch_toggle.set_visible(visible)
 
+    def update_activity_widgets(self):
+        num_tasks = self.installer.get_task_count()
+
+        if num_tasks > 0:
+            self.active_tasks_button.show()
+
+            text = gettext.ngettext("%d task running", "%d tasks running", num_tasks) % num_tasks
+
+            self.active_tasks_button.set_tooltip_text(text)
+            self.active_tasks_spinner.start()
+        else:
+            self.active_tasks_button.hide()
+            self.active_tasks_spinner.stop()
+
+        if self.current_category == self.active_tasks_category:
+            self.show_active_tasks() # Refresh the view, remove old items
+
     def update_state(self, pkginfo):
+        self.update_activity_widgets()
+
         installed_packages = self.settings.get_strv(INSTALLED_APPS)
         if self.installer.pkginfo_is_installed(pkginfo):
             if pkginfo.name not in installed_packages:
@@ -920,6 +945,9 @@ class Application(Gtk.Application):
 
     def category_button_clicked(self, button, category):
         self.show_category(category)
+
+    def on_menu_button_clicked(self, button, menu):
+        menu.popup_at_pointer(None)
 
     def on_subsearch_toggled(self, button):
         self.settings.set_boolean(SEARCH_IN_CATEGORY, button.get_active())
@@ -1067,6 +1095,8 @@ class Application(Gtk.Application):
                                     self.on_installer_progress,
                                     self.on_installer_error)
 
+        self.update_activity_widgets()
+
     def on_launch_button_clicked(self, button, task):
         if task.exec_string is not None:
             exec_array = task.exec_string.split()
@@ -1099,6 +1129,8 @@ class Application(Gtk.Application):
 
         self.installed_category = Category(_("Installed Applications"), None, self.categories)
         self.installed_category.matchingPackages = self.settings.get_strv(INSTALLED_APPS)
+
+        self.active_tasks_category = Category(_("Currently working on the following packages"), None, None)
 
         self.picks_category = Category(_("Editors' Picks"), None, self.categories)
         edition = ""
@@ -1327,6 +1359,16 @@ class Application(Gtk.Application):
         except IndexError:
             pass
 
+    def on_active_tasks_button_clicked(self, button):
+        self.show_active_tasks()
+
+    def show_active_tasks(self):
+        self.current_pkginfo = None
+
+        self.active_tasks_category.pkginfos = self.installer.get_active_pkginfos()
+
+        self.show_category(self.active_tasks_category)
+
     def on_back_button_clicked(self, button):
         self.go_back_action()
 
@@ -1361,6 +1403,7 @@ class Application(Gtk.Application):
 
     @print_timing
     def show_category(self, category):
+        self.current_pkginfo = None
 
         label = self.builder.get_object("label_cat_name")
 
@@ -1457,6 +1500,7 @@ class Application(Gtk.Application):
 
         XApp.set_window_progress(self.main_window, 0)
         self.stop_progress_pulse()
+        self.current_pkginfo = None
 
         for child in self.flowbox_applications.get_children():
             self.flowbox_applications.remove(child)
@@ -1496,10 +1540,10 @@ class Application(Gtk.Application):
                 if termsUpper in pkginfo.name.upper():
                     searched_packages.append(pkginfo)
                     break
-                if (search_in_summary and termsUpper in self.installer.get_summary(pkginfo).upper()):
+                if (search_in_summary and termsUpper in self.installer.get_summary(pkginfo, for_search=True).upper()):
                     searched_packages.append(pkginfo)
                     break
-                if(search_in_description and termsUpper in self.installer.get_description(pkginfo).upper()):
+                if(search_in_description and termsUpper in self.installer.get_description(pkginfo, for_search=True).upper()):
                     searched_packages.append(pkginfo)
                     break
                 break
@@ -1567,9 +1611,14 @@ class Application(Gtk.Application):
             self.flowbox_applications.remove(child)
 
         self.category_tiles = []
-
         if len(pkginfos) == 0:
             self.app_list_stack.set_visible_child_name("no-results")
+            if self.current_category == self.active_tasks_category:
+                text = _("All operations complete")
+            else:
+                text = _("No matching packages found")
+
+            self.no_packages_found_label.set_markup("<big><b>%s</b></big>" % text)
         else:
             self.app_list_stack.set_visible_child_name("results")
 
