@@ -1830,8 +1830,19 @@ class Application(Gtk.Application):
             downloadScreenshots = ScreenshotDownloader(self, pkginfo)
             downloadScreenshots.start()
 
-        # # Set source-specific things
+        # Hide some widgets that may or may not be used when the task is ready
+        self.builder.get_object("application_remote").hide()
+        self.builder.get_object("label_remote").hide()
+        self.builder.get_object("application_architecture").hide()
+        self.builder.get_object("label_architecture").hide()
+        self.builder.get_object("application_branch").hide()
+        self.builder.get_object("label_branch").hide()
+        self.builder.get_object("application_version").hide()
+        self.builder.get_object("label_version").hide()
+        self.builder.get_object("application_size").hide()
+        self.builder.get_object("label_size").hide()
 
+        # Call the installer to get the rest of the information
         self.installer.select_pkginfo(pkginfo, self.on_installer_task_ready)
 
     def on_installer_task_ready(self, task):
@@ -1910,6 +1921,8 @@ class Application(Gtk.Application):
                 sizeinfo = _("%(downloadSize)s to download, %(localSize)s of disk space required") \
                                  % {'downloadSize': GLib.format_size(task.download_size), 'localSize': GLib.format_size(task.install_size)}
 
+        self.builder.get_object("label_size").show()
+        self.builder.get_object("application_size").show()
         self.builder.get_object("application_size").set_label(sizeinfo)
 
         self.builder.get_object("application_remote").set_visible(task.remote != "")
