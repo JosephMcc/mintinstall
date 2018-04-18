@@ -1304,6 +1304,10 @@ class Application(Gtk.Application):
 
                 self.add_pkginfo_to_category(pkginfo, category)
 
+        for package_name in self.installed_category.matchingPackages:
+            pkginfo = self.installer.find_pkginfo(package_name, "f")
+            self.add_pkginfo_to_category(pkginfo, self.installed_category)
+
         for key in self.installer.cache.get_subset_of_type("f"):
             self.add_pkginfo_to_category(self.installer.cache[key], self.flatpak_category)
 

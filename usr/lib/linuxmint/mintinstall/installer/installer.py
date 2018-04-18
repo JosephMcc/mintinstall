@@ -404,19 +404,23 @@ class Installer:
         print("Done with task", task.pkginfo.pkg_hash)
         del self.tasks[task.pkginfo.pkg_hash]
 
-        GObject.idle_add(task.client_finished_cb, task.pkginfo)
-
         if len(self.tasks.keys()) == 0:
             self._post_task_update(task)
             return
 
     def _post_task_update(self, task):
         if task.pkginfo.pkg_hash.startswith("a"):
-            thread = threading.Thread(target=self._apt_post_task_update_thread)
+            thread = threading.Thread(target=self._apt_post_task_update_thread, args=(task,))
             thread.start()
+        else:
+            GObject.idle_add(task.client_finished_cb, task.pkginfo)
 
-    def _apt_post_task_update_thread(self):
+    def _apt_post_task_update_thread(self, task):
         _apt._sync_cache_installed_states()
+
+        # This needs to be called after reloading the apt cache, otherwise our installed
+        # apps don't update correctly
+        GObject.idle_add(task.client_finished_cb, task.pkginfo)
 
 def interact():
     import readline
