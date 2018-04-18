@@ -292,6 +292,7 @@ def _confirm_deps(trans):
             res = dia.run()
             dia.hide()
             if res != Gtk.ResponseType.OK:
+                GObject.idle_add(_task.finished_cleanup_cb, _task)
                 return
         _run_transaction(trans)
     except Exception as e:

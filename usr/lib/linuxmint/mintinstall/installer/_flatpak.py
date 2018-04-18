@@ -600,6 +600,7 @@ def execute_transaction(task):
         res = dia.run()
         dia.hide()
         if res != Gtk.ResponseType.OK:
+            GObject.idle_add(task.finished_cleanup_cb, task)
             return
 
     if task.client_progress_cb == None or task.client_error_cb == None:
