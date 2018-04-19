@@ -622,24 +622,6 @@ class Application(Gtk.Application):
         self.builder.get_object("box_subcategories").pack_start(self.listbox_categories, False, False, 0)
         self.listbox_categories_selected_id = self.listbox_categories.connect('row-activated', self.on_row_activated)
 
-        class RevealerData:
-            def __init__(self, rev):
-                self.start_val = 0
-                self.down = False
-                self.revealer = rev
-
-        revealer = self.builder.get_object("detail_header_revealer")
-        data = RevealerData(revealer)
-
-        self.builder.get_object("scrolled_details") \
-                .get_vadjustment().connect("value-changed", self.on_adjust_changed, data)
-
-        revealer = self.builder.get_object("list_header_revealer")
-        data = RevealerData(revealer)
-
-        self.builder.get_object("scrolledwindow_applications") \
-                .get_vadjustment().connect("value-changed", self.on_adjust_changed, data)
-
     def on_installer_ready(self):
         self.build_matched_packages()
         self.process_matching_packages()
@@ -781,36 +763,6 @@ class Application(Gtk.Application):
         flowbox.insert(button, -1)
         box.pack_start(flowbox, True, True, 0)
         box.show_all()
-
-    def on_adjust_changed(self, adjustment, data):
-        threshold = 100
-        val = adjustment.get_value()
-        down = val > data.start_val
-        visible = data.revealer.get_reveal_child()
-
-        if data.start_val == -1:
-            data.start_val = val
-            data.down = down
-            return
-
-        if val == 0 and not visible:
-            data.revealer.set_reveal_child(True)
-
-        if down != data.down:
-            data.down = down
-            data.val = val
-            return
-
-        if (down and not visible) or (not down and visible):
-            data.start_val = val
-            return
-
-        if val > data.start_val:
-            if val - data.start_val > threshold:
-                data.revealer.set_reveal_child(False)
-        elif val < data.start_val:
-            if data.start_val - val > threshold:
-                data.revealer.set_reveal_child(True)
 
     def update_conditional_widgets(self):
         sensitive = len(self.installed_category.pkginfos) > 0 and \
