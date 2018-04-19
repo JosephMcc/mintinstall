@@ -224,91 +224,81 @@ def _calculate_apt_changes(task):
 
     GObject.idle_add(task.info_ready_callback, task)
 
-_apt_client = None
-_task = None
+def sync_cache_installed_states():
+    get_apt_cache(full=True)
 
 def execute_transaction(task):
-    global _apt_client
-    global _task
+    task.transaction = MetaTransaction(task)
 
-    _task = task
-
-    if _apt_client == None:
-        _apt_client = aptdaemon.client.AptClient()
-
-    if task.type == "remove":
-        _apt_client.remove_packages([task.pkginfo.name],
-                                    reply_handler=_simulate_trans,
-                                    error_handler=_on_error)
-    else:
-        _apt_client.install_packages([task.pkginfo.name],
-                                     reply_handler=_simulate_trans,
-                                     error_handler=_on_error)
-
-############################### Installation/Removal UI Stuff
 
 class MetaTransaction():
-    def __init__(self, task, transaction):
-        self.transaction = transaction
+    def __init__(self, task):
+        self.apt_client = aptdaemon.client.AptClient()
         self.task = task
-        self.pkginfo = task.pkginfo
+        self.apt_transaction = None
 
-        transaction.set_debconf_frontend("gnome")
-        transaction.connect("finished", self.on_transaction_finished)
+        if task.type == "remove":
+            self.apt_client.remove_packages([task.pkginfo.name],
+                                            reply_handler=self._calculate_changes,
+                                            error_handler=self._on_error) # dbus.DBusException
+        else:
+            self.apt_client.install_packages([task.pkginfo.name],
+                                             reply_handler=self._calculate_changes,
+                                             error_handler=self._on_error) # dbus.DBusException
 
-        if task.client_progress_cb == None or task.client_error_cb == None:
-            progress_window = AptProgressDialog(transaction)
+    def _calculate_changes(self, apt_transaction):
+        self.apt_transaction = apt_transaction
+        self.apt_transaction.set_debconf_frontend("gnome")
+
+        self.apt_transaction.simulate(reply_handler=self._confirm_changes,
+                                      error_handler=self._on_error) # aptdaemon.errors.TransactionFailed, dbus.DBusException
+
+    def _confirm_changes(self):
+        try:
+            if [pkgs for pkgs in self.apt_transaction.dependencies if pkgs]:
+                dia = ChangesConfirmDialog(self.apt_transaction, self.task)
+                res = dia.run()
+                dia.hide()
+                if res != Gtk.ResponseType.OK:
+                    GObject.idle_add(self.task.finished_cleanup_cb, self.task)
+                    return
+            self._run_transaction()
+        except Exception as e:
+            print(e)
+
+    def _on_error(self, error):
+        if isinstance(error, aptdaemon.errors.NotAuthorizedError):
+            # Silently ignore auth failures
+            return
+        elif not isinstance(error, aptdaemon.errors.TransactionFailed):
+            # Catch internal errors of the client
+            error = aptdaemon.errors.TransactionFailed(aptdaemon.enums.ERROR_UNKNOWN,
+                                                       str(error))
+        dia = AptErrorDialog(error)
+        dia.run()
+        dia.hide()
+        GObject.idle_add(self.task.finished_cleanup_cb, self.task)
+
+    def _run_transaction(self):
+        self.apt_transaction.connect("finished", self.on_transaction_finished)
+
+        if self.task.client_progress_cb == None or self.task.client_error_cb == None:
+            progress_window = AptProgressDialog(self.apt_transaction)
             progress_window.run()
         else:
-            transaction.connect("progress-changed", self.on_transaction_progress)
-            transaction.connect("error", self.on_transaction_error)
-            transaction.run()
+            self.apt_transaction.connect("progress-changed", self.on_transaction_progress)
+            self.apt_transaction.connect("error", self.on_transaction_error)
+            self.apt_transaction.run()
 
-    def on_transaction_progress(self, transaction, progress):
+    def on_transaction_progress(self, apt_transaction, progress):
         self.task.client_progress_cb(self.task.pkginfo, progress, False)
 
-    def on_transaction_error(self, transaction, error_code, error_details):
+    def on_transaction_error(self, apt_transaction, error_code, error_details):
         self.task.client_error_cb(self.task.pkginfo, error_code, error_details)
 
-    def on_transaction_finished(self, transaction, exit_state):
+    def on_transaction_finished(self, apt_transaction, exit_state):
+        # finished signal is always called whether successful or not
+        # Only call here if we succeeded, to prevent multiple calls
         if (exit_state == aptdaemon.enums.EXIT_SUCCESS):
+            print("succeeded")
             self.task.finished_cleanup_cb(self.task)
-
-def _run_transaction(transaction):
-    global _task
-
-    _task.transaction = MetaTransaction(_task, transaction)
-
-def _simulate_trans(trans):
-    trans.simulate(reply_handler=lambda: _confirm_deps(trans),
-                   error_handler=_on_error)
-
-def _confirm_deps(trans):
-    global _task
-
-    try:
-        if [pkgs for pkgs in trans.dependencies if pkgs]:
-            dia = ChangesConfirmDialog(trans, _task)
-            res = dia.run()
-            dia.hide()
-            if res != Gtk.ResponseType.OK:
-                GObject.idle_add(_task.finished_cleanup_cb, _task)
-                return
-        _run_transaction(trans)
-    except Exception as e:
-        print(e)
-
-def _on_error(error):
-    if isinstance(error, aptdaemon.errors.NotAuthorizedError):
-        # Silently ignore auth failures
-        return
-    elif not isinstance(error, aptdaemon.errors.TransactionFailed):
-        # Catch internal errors of the client
-        error = aptdaemon.errors.TransactionFailed(aptdaemon.enums.ERROR_UNKNOWN,
-                                                   str(error))
-    dia = AptErrorDialog(error)
-    dia.run()
-    dia.hide()
-
-def _sync_cache_installed_states():
-    get_apt_cache(full=True)

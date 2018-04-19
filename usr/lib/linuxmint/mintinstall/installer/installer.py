@@ -416,7 +416,7 @@ class Installer:
             GObject.idle_add(task.client_finished_cb, task.pkginfo)
 
     def _apt_post_task_update_thread(self, task):
-        _apt._sync_cache_installed_states()
+        _apt.sync_cache_installed_states()
 
         # This needs to be called after reloading the apt cache, otherwise our installed
         # apps don't update correctly
