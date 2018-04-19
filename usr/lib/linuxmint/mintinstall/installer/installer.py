@@ -71,17 +71,17 @@ class InstallerTask:
         self.cancellable = Gio.Cancellable()
 
         # Callbacks that will be used at various points during a task being operated on.  The .client_* callbacks are arguments
-        # of Installer.execute_task().  Only the client_finished callback is required.  If the other 2 are missing, a standalone
-        # progress window is assumed to be wanted, and the other callbacks are wired up to it. (For flatpaks only, apt has its own
-        # progress callbacks in their dialog.)
+        # of Installer.execute_task().  The client_finished_cb is required.  If the progress callback is missing, a standalone
+        # progress window will be provided.
         self.client_progress_cb = None
-        self.client_error_cb = None
         self.client_finished_cb = None
 
-        # This is internally used - it's called as the 'real' finished callback, possibly does some cleanup
-        # (like reloading the apt cache) before finally calling task.client_finished_cb
+        # These are internally used - called as the 'real' error and finished callback, to do some cleanup
+        # like removing the task and reloading the apt cache before finally calling task.client_finished_cb
+        self.error_cleanup_cb = None
         self.finished_cleanup_cb = None
 
+        self.has_window = False
         # Updated throughout a flatpak operation - for now it's used for updating the standalone flatpak progress window
         self.progress_state = self.PROGRESS_STATE_INIT
         # Same - allows the flatpak window to update the current package being installed/removed
@@ -383,7 +383,7 @@ class Installer:
         """
         return task.pkginfo.pkg_hash in self.tasks.keys()
 
-    def execute_task(self, task, client_finished_cb, client_progress_cb=None, client_error_cb=None):
+    def execute_task(self, task, client_finished_cb, client_progress_cb=None):
         """
         Executes a given task.  The client_finished_cb is required always, to notify when the task completes.
         The progress and error callbacks are optional.  If they're left out, a standalone progress window is created
@@ -392,35 +392,48 @@ class Installer:
         self.tasks[task.pkginfo.pkg_hash] = task
         print("Starting task for package %s, type '%s'" % (task.pkginfo.pkg_hash, task.type))
 
-        task.client_progress_cb = client_progress_cb
-        task.client_error_cb = client_error_cb
         task.client_finished_cb = client_finished_cb
+        task.client_progress_cb = client_progress_cb
 
         task.finished_cleanup_cb = self._task_finished
+        task.error_cleanup_cb = self._task_error
 
         task.execute(task)
 
     def _task_finished(self, task):
-        print("Done with task", task.pkginfo.pkg_hash)
+        print("Done with task (success)", task.pkginfo.pkg_hash)
         del self.tasks[task.pkginfo.pkg_hash]
 
         if len(self.tasks.keys()) == 0:
             self._post_task_update(task)
-            return
+        else:
+            self._run_client_callback(task)
+
+    def _task_error(self, task):
+        print("Done with task (error)", task.pkginfo.pkg_hash)
+        del self.tasks[task.pkginfo.pkg_hash]
+
+        if len(self.tasks.keys()) == 0:
+            self._post_task_update(task)
+        else:
+            self._run_client_callback(task)
 
     def _post_task_update(self, task):
         if task.pkginfo.pkg_hash.startswith("a"):
             thread = threading.Thread(target=self._apt_post_task_update_thread, args=(task,))
             thread.start()
         else:
-            GObject.idle_add(task.client_finished_cb, task.pkginfo)
+            self._run_client_callback(task)
 
     def _apt_post_task_update_thread(self, task):
         _apt.sync_cache_installed_states()
 
         # This needs to be called after reloading the apt cache, otherwise our installed
         # apps don't update correctly
-        GObject.idle_add(task.client_finished_cb, task.pkginfo)
+        self._run_client_callback(task)
+
+    def _run_client_callback(self, task):
+        GObject.idle_add(task.client_finished_cb, task.pkginfo, task.error_message)
 
 def interact():
     import readline

@@ -122,14 +122,13 @@ class FlatpakProgressWindow(Gtk.Dialog):
         self.task = task
         self.finished = False
 
-        task.client_progress_cb = self.on_task_progress_cb
-        task.client_error_cb = self.on_task_error_cb
+        # Progress goes directly to this window
+        task.client_progress_cb = self.window_client_progress_cb
 
-        # Redirect the normal task completion callback to allow this dialog
-        # to do some stuff as well. self.on_finished will be called at the end
-        # of _flatpak.MetaTransaction.  We'll call the original callback from here.
-        self.installer_cleanup_cb = task.finished_cleanup_cb
-        task.finished_cleanup_cb = self.on_finished
+        # finished callbacks route thru the installer
+        # but we want to see them in this window also.
+        self.final_finished_cb = task.client_finished_cb
+        task.client_finished_cb = self.window_client_finished_cb
 
         self.pulse_timer = 0
         self.active_task_state = task.progress_state
@@ -167,6 +166,8 @@ class FlatpakProgressWindow(Gtk.Dialog):
         self.progress_label = Gtk.Label()
         vbox_progress.pack_start(self.progress_label, False, False, 0)
         self.progress_label.set_halign(Gtk.Align.START)
+        self.progress_label.set_line_wrap(True)
+        self.progress_label.set_max_width_chars(60)
 
         vbox.pack_start(vbox_progress, False, True, 0)
         hbox.pack_start(vbox, True, True, 0)
@@ -174,7 +175,7 @@ class FlatpakProgressWindow(Gtk.Dialog):
         self.get_content_area().pack_start(hbox, True, True, 0)
 
         self.set_title(_("Flatpak Progress"))
-        XApp.set_window_icon_name(self, "system-installer")
+        XApp.set_window_icon_name(self, "system-software-installer")
 
         hbox.show_all()
         self.realize()
@@ -191,15 +192,6 @@ class FlatpakProgressWindow(Gtk.Dialog):
 
         # catch ESC and behave as if cancel was clicked
         self.connect("delete-event", self._on_dialog_delete_event)
-
-    def on_button_clicked(self, button):
-        if not self.finished:
-            self.stop_progress_pulse()
-            self.progress.set_fraction(0.0)
-            self.task.cancellable.cancel()
-        else:
-            self.destroy()
-            self.installer_cleanup_cb(self.task)
 
     def set_progress_text(self, text):
         if text != self.real_progress_text:
@@ -234,44 +226,23 @@ class FlatpakProgressWindow(Gtk.Dialog):
             phase_label = _("Initializing")
             self.set_progress_text("")
         elif self.task.progress_state == self.task.PROGRESS_STATE_INSTALLING:
-            phase_label = _("Installing packages")
+            phase_label = _("Installing flatpaks")
             self.set_progress_text(_("Installing: %s") % self.task.current_package_name)
         elif self.task.progress_state == self.task.PROGRESS_STATE_REMOVING:
-            phase_label = _("Removing packages")
+            phase_label = _("Removing flatpaks")
             self.set_progress_text(_("Removing: %s") % self.task.current_package_name)
         elif self.task.progress_state == self.task.PROGRESS_STATE_UPDATING:
-            phase_label = _("Updating packages")
+            phase_label = _("Updating flatpaks")
             self.set_progress_text(_("Updating: %s") % self.task.current_package_name)
         elif self.task.progress_state == self.task.PROGRESS_STATE_FINISHED:
             phase_label = _("Finished")
             self.set_progress_text(_("Operation completed successfully"))
         elif self.task.progress_state == self.task.PROGRESS_STATE_FAILED:
             phase_label = _("Failed")
-            self.set_progress_text(_("The operation was unsuccessful"))
+            self.set_progress_text(_("An error occurred:\n\n%s") % self.task.error_message)
 
         self.phase_label.set_markup("<big><b>%s</b></big>" % phase_label)
-
-    def _on_dialog_delete_event(self, dialog, event):
-        self.button.clicked()
-        return True
-
-    def on_task_progress_cb(self, pkginfo, progress, estimating):
-        if estimating:
-            self.start_progress_pulse()
-        else:
-            self.stop_progress_pulse()
-
-            self.progress.set_fraction(progress / 100.0)
-            XApp.set_window_progress(self, progress)
-            self.tick()
-
-        self.update_labels()
-
-    def on_task_error_cb(self, pkginfo, error_code, error_details):
-        self.progress.set_fraction(0.0)
-        XApp.set_window_progress(self, 0)
-
-        self.on_finished(self.task, error_details)
+        self.set_title(phase_label)
 
     def start_progress_pulse(self):
         if self.pulse_timer > 0:
@@ -290,26 +261,66 @@ class FlatpakProgressWindow(Gtk.Dialog):
             GObject.source_remove(self.pulse_timer)
             self.pulse_timer = 0
 
-    def on_finished(self, task, error=None):
+    def _on_dialog_delete_event(self, dialog, event):
+        self.button.clicked()
+        return True
+
+    def window_client_progress_cb(self, pkginfo, progress, estimating):
+        if estimating:
+            self.start_progress_pulse()
+        else:
+            self.stop_progress_pulse()
+
+            self.progress.set_fraction(progress / 100.0)
+            XApp.set_window_progress(self, progress)
+            self.tick()
+
+        self.update_labels()
+
+    def window_client_finished_cb(self, pkginfo, error_message):
         self.finished = True
 
         XApp.set_window_progress(self, 0)
         self.stop_progress_pulse()
 
-        if ((not task.cancellable.is_cancelled()) and error == None) or error:
-            self.progress.set_fraction(1.0)
-            self.set_urgency_hint(True)
+        self.progress.set_fraction(1.0)
 
         self.update_labels()
-        self.button.set_label(Gtk.STOCK_CLOSE)
 
-        if error != None:
-            err_dialog = Gtk.MessageDialog(self,
-                                           Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                                           Gtk.MessageType.ERROR,
-                                           Gtk.ButtonsType.OK,
-                                           _("An error occurred during the operation:\n\n%s") % error)
-            err_dialog.run()
-            err_dialog.hide()
+        if error_message:
+            self.set_urgency_hint(True)
+            self.button.set_label(Gtk.STOCK_CLOSE)
+        else:
+            self.destroy()
+            self.final_finished_cb(self.task.pkginfo, error_message)
 
+    def on_button_clicked(self, button):
+        if not self.finished:
+            self.task.cancellable.cancel()
+        else:
+            self.destroy()
+            self.final_finished_cb(self.task.pkginfo, self.task.error_message)
 
+def show_flatpak_error(message):
+    GObject.idle_add(_show_flatpak_error_mainloop, message, priority=GLib.PRIORITY_DEFAULT)
+
+def _show_flatpak_error_mainloop(message):
+
+    dialog = Gtk.MessageDialog(None,
+                               Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                               Gtk.MessageType.ERROR,
+                               Gtk.ButtonsType.OK,
+                               "")
+
+    text = _("An error occurred")
+    dialog.set_markup("<big><b>%s</b></big>" % text)
+    message_label = Gtk.Label(message)
+    dialog.get_message_area().pack_start(message_label, False, False, 6)
+    message_label.set_line_wrap(True)
+    message_label.set_max_width_chars(60)
+    message_label.show()
+
+    dialog.run()
+    dialog.hide()
+
+    return False

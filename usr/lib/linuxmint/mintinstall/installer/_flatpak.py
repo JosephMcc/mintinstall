@@ -10,6 +10,8 @@ import threading
 import math
 
 from installer.pkgInfo import FlatpakPkgInfo
+
+from installer import dialogs
 from installer.dialogs import ChangesConfirmDialog, FlatpakProgressWindow
 
 _fp_sys = None
@@ -330,13 +332,23 @@ def _get_runtime_ref(fp_sys, remote_name, ref):
 
     return runtime_ref
 
-def _get_related_refs(fp_sys, remote, ref):
+def _get_remote_related_refs(fp_sys, remote, ref):
     related_refs = []
 
     try:
         related_refs = fp_sys.list_remote_related_refs_sync(remote, ref.format_ref(), None)
     except GLib.Error as e:
-        raise Exception("Could not determine related refs for app: %s" % e.message)
+        raise Exception("Could not determine remote related refs for app: %s" % e.message)
+
+    return related_refs
+
+def _get_installed_related_refs(fp_sys, remote, ref):
+    related_refs = []
+
+    try:
+        related_refs = fp_sys.list_installed_related_refs_sync(remote, ref.format_ref(), None)
+    except GLib.Error as e:
+        raise Exception("Could not determine installed refs for app: %s" % e.message)
 
     return related_refs
 
@@ -352,6 +364,7 @@ def _select_updates_thread(task):
     except GLib.Error as e:
         task.info_ready_status = task.STATUS_BROKEN
         task.error_message = str(e)
+        dialogs.show_flatpak_error(task.error_message)
         if task.info_ready_callback:
             GObject.idle_add(task.info_ready_callback, task)
         return
@@ -407,8 +420,8 @@ def _pick_refs_for_installation(task):
             if runtime_ref in update_list:
                 _add_ref_to_task(fp_sys, task, runtime_ref, needs_update=True)
 
-        all_related_refs = _get_related_refs(fp_sys, remote_name, ref)
-        all_related_refs += _get_related_refs(fp_sys, remote_name, runtime_ref)
+        all_related_refs = _get_remote_related_refs(fp_sys, remote_name, ref)
+        all_related_refs += _get_remote_related_refs(fp_sys, remote_name, runtime_ref)
 
         for related_ref in all_related_refs:
             if (not _is_ref_installed(fp_sys, remote_name, related_ref)) and related_ref.should_download():
@@ -421,6 +434,7 @@ def _pick_refs_for_installation(task):
         # Something went wrong, bail out
         task.info_ready_status = task.STATUS_BROKEN
         task.error_message = str(e)
+        dialogs.show_flatpak_error(task.error_message)
         if task.info_ready_callback:
             GObject.idle_add(task.info_ready_callback, task)
         return
@@ -451,7 +465,7 @@ def _pick_refs_for_removal(task):
 
         _add_ref_to_task(fp_sys, task, ref)
 
-        related_refs = _get_related_refs(fp_sys, remote, ref)
+        related_refs = _get_installed_related_refs(fp_sys, remote, ref)
 
         for related_ref in related_refs:
             if _is_ref_installed(fp_sys, remote, related_ref) and related_ref.should_delete():
@@ -460,6 +474,7 @@ def _pick_refs_for_removal(task):
     except Exception as e:
         task.info_ready_status = task.STATUS_BROKEN
         task.error_message = str(e)
+        dialogs.show_flatpak_error(task.error_message)
         GObject.idle_add(task.info_ready_callback, task)
         return
 
@@ -603,7 +618,9 @@ def execute_transaction(task):
             GObject.idle_add(task.finished_cleanup_cb, task)
             return
 
-    if task.client_progress_cb == None or task.client_error_cb == None:
+    if task.client_progress_cb != None:
+        task.has_window = True
+    else:
         progress_window = FlatpakProgressWindow(task)
         progress_window.present()
 
@@ -704,7 +721,14 @@ class MetaTransaction():
         GLib.idle_add(self.task.client_progress_cb, self.task.pkginfo, actual_progress, estimating, priority=GLib.PRIORITY_DEFAULT)
 
     def on_flatpak_error(self, error_details):
-        GLib.idle_add(self.task.client_error_cb, self.task.pkginfo, -1, error_details)
+        self.task.error_message = error_details
+
+        # Show an error popup only if we're in mintinstall, otherwise a flatpak
+        # progress window will show the error details
+        if self.task.has_window:
+            dialogs.show_flatpak_error(error_details)
+
+        GLib.idle_add(self.task.error_cleanup_cb, self.task)
 
     def on_flatpak_finished(self):
         GLib.idle_add(self.task.finished_cleanup_cb, self.task)

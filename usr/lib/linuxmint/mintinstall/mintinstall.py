@@ -787,7 +787,7 @@ class Application(Gtk.Application):
             self.active_tasks_button.hide()
             self.active_tasks_spinner.stop()
 
-        if self.current_category == self.active_tasks_category:
+        if self.current_category == self.active_tasks_category and self.page_stack.get_visible_child_name() == self.PAGE_LIST:
             self.show_active_tasks() # Refresh the view, remove old items
 
     def update_state(self, pkginfo):
@@ -1040,12 +1040,11 @@ class Application(Gtk.Application):
         os.system("kill -9 %s &" % os.getpid())
 
     def on_action_button_clicked(self, button, task):
-        self.start_progress_pulse()
+        self.on_installer_progress(task.pkginfo, 0, True)
 
         self.installer.execute_task(task,
                                     self.on_installer_finished,
-                                    self.on_installer_progress,
-                                    self.on_installer_error)
+                                    self.on_installer_progress)
 
         self.update_activity_widgets()
 
@@ -1348,6 +1347,8 @@ class Application(Gtk.Application):
             if self.current_category == self.installed_category:
                 # special case, when going back to the installed-category, refresh it in case we removed something
                 self.show_category(self.installed_category)
+            elif self.current_category == self.active_tasks_category:
+                self.show_active_tasks()
             else:
                 try:
                     fc = self.flowbox_applications.get_selected_children()[0]
@@ -1934,13 +1935,7 @@ class Application(Gtk.Application):
                 XApp.set_window_progress(self.main_window, progress)
                 self.progress_label.tick()
 
-    def on_installer_error(self, pkginfo, error_code, error_details):
-        if self.current_pkginfo is not None and self.current_pkginfo.name == pkginfo.name:
-            self.builder.get_object("notebook_progress").set_current_page(self.ACTION_TAB)
-            self.builder.get_object("application_progress").set_fraction(0.0)
-            XApp.set_window_progress(self.main_window, 0)
-
-    def on_installer_finished(self, pkginfo):
+    def on_installer_finished(self, pkginfo, error):
         if self.current_pkginfo is not None and self.current_pkginfo.name == pkginfo.name:
             self.stop_progress_pulse()
 

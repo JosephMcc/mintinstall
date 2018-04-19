@@ -9,6 +9,7 @@ from gi.repository import GObject, Gtk
 import apt
 import time
 import threading
+import dbus
 
 import aptdaemon.client
 from aptdaemon.gtk3widgets import AptErrorDialog, AptProgressDialog
@@ -228,8 +229,10 @@ def sync_cache_installed_states():
     get_apt_cache(full=True)
 
 def execute_transaction(task):
-    task.transaction = MetaTransaction(task)
+    if task.client_progress_cb != None:
+        task.has_window = True
 
+    task.transaction = MetaTransaction(task)
 
 class MetaTransaction():
     def __init__(self, task):
@@ -267,38 +270,48 @@ class MetaTransaction():
             print(e)
 
     def _on_error(self, error):
-        if isinstance(error, aptdaemon.errors.NotAuthorizedError):
+        if self.apt_transaction.error_code == "error-not-authorized":
             # Silently ignore auth failures
+
+            self.task.error_message = None # Should already be none, but this is a reminder
             return
         elif not isinstance(error, aptdaemon.errors.TransactionFailed):
             # Catch internal errors of the client
             error = aptdaemon.errors.TransactionFailed(aptdaemon.enums.ERROR_UNKNOWN,
                                                        str(error))
-        dia = AptErrorDialog(error)
-        dia.run()
-        dia.hide()
-        GObject.idle_add(self.task.finished_cleanup_cb, self.task)
+
+        if self.task.progress_state != self.task.PROGRESS_STATE_FAILED:
+            self.task.progress_state = self.task.PROGRESS_STATE_FAILED
+
+            self.task.error_message = self.apt_transaction.error_details
+
+            dia = AptErrorDialog(error)
+            dia.run()
+            dia.hide()
+            GObject.idle_add(self.task.error_cleanup_cb, self.task)
 
     def _run_transaction(self):
         self.apt_transaction.connect("finished", self.on_transaction_finished)
 
-        if self.task.client_progress_cb == None or self.task.client_error_cb == None:
-            progress_window = AptProgressDialog(self.apt_transaction)
-            progress_window.run()
-        else:
+        if self.task.has_window:
             self.apt_transaction.connect("progress-changed", self.on_transaction_progress)
             self.apt_transaction.connect("error", self.on_transaction_error)
-            self.apt_transaction.run()
+            self.apt_transaction.run(reply_handler=lambda x: print("sddsd"), error_handler=self._on_error)
+        else:
+            progress_window = AptProgressDialog(self.apt_transaction)
+            progress_window.run(show_error=False, error_handler=self._on_error)
 
     def on_transaction_progress(self, apt_transaction, progress):
-        self.task.client_progress_cb(self.task.pkginfo, progress, False)
+        if not apt_transaction.error:
+            self.task.client_progress_cb(self.task.pkginfo, progress, False)
 
     def on_transaction_error(self, apt_transaction, error_code, error_details):
-        self.task.client_error_cb(self.task.pkginfo, error_code, error_details)
+        if self.task.progress_state != self.task.PROGRESS_STATE_FAILED:
+            self._on_error(apt_transaction.error)
 
     def on_transaction_finished(self, apt_transaction, exit_state):
         # finished signal is always called whether successful or not
         # Only call here if we succeeded, to prevent multiple calls
-        if (exit_state == aptdaemon.enums.EXIT_SUCCESS):
-            print("succeeded")
-            self.task.finished_cleanup_cb(self.task)
+        if (exit_state == aptdaemon.enums.EXIT_SUCCESS) or apt_transaction.error_code == "error-not-authorized":
+            self.task.progress_state = self.task.PROGRESS_STATE_FINISHED
+            GObject.idle_add(self.task.finished_cleanup_cb, self.task)
