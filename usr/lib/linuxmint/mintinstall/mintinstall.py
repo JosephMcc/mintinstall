@@ -253,7 +253,7 @@ class Tile(Gtk.Button):
             self.installed_mark.clear()
 
 class PackageTile(Tile):
-    def __init__(self, pkginfo, icon, summary, installer, show_more_info=False):
+    def __init__(self, pkginfo, icon, summary, installer, review_info=None, show_more_info=False):
         Tile.__init__(self, pkginfo, installer)
 
         label_name = Gtk.Label(xalign=0)
@@ -283,14 +283,54 @@ class PackageTile(Tile):
 
         vbox.pack_start(name_box, False, False, 0)
         vbox.pack_start(label_summary, False, False, 0)
+        vbox.set_valign(Gtk.Align.CENTER)
 
         hbox = Gtk.Box()
         hbox.pack_start(icon, False, False, 0)
         hbox.pack_start(vbox, False, False, 0)
 
+        if review_info:
+            hbox.pack_end(self.get_rating_widget(review_info), False, False, 0)
+
         self.add(hbox)
 
         self.refresh_state()
+
+    def get_rating_widget(self, review_info):
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        star_and_average_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+
+        box_stars = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+
+        rating = review_info.avg_rating
+        remaining_stars = 5
+        while rating >= 1.0:
+            box_stars.pack_start(Gtk.Image.new_from_icon_name("starred-symbolic", Gtk.IconSize.MENU), False, False, 0)
+            rating -= 1
+            remaining_stars -= 1
+        if rating > 0.0:
+            box_stars.pack_start(Gtk.Image.new_from_icon_name("semi-starred-symbolic", Gtk.IconSize.MENU), False, False, 0)
+            remaining_stars -= 1
+        for i in range (remaining_stars):
+            box_stars.pack_start(Gtk.Image.new_from_icon_name("non-starred-symbolic", Gtk.IconSize.MENU), False, False, 0)
+        box_stars.show_all()
+
+        star_and_average_box.pack_start(box_stars, False, False, 2)
+
+        average_rating_label = Gtk.Label()
+        average_rating_label.set_markup("<b>%s</b>" % str(review_info.avg_rating))
+        star_and_average_box.pack_start(average_rating_label, False, False, 2)
+
+        label_num_reviews = Gtk.Label()
+        label_num_reviews.set_markup("<small><i>%s %s</i></small>" % (str(review_info.num_reviews), _("Reviews")))
+
+        vbox.pack_start(star_and_average_box, False, False, 2)
+        vbox.pack_start(label_num_reviews, False, False, 2)
+        vbox.set_valign(Gtk.Align.CENTER)
+
+        vbox.show_all()
+        return vbox
 
 class VerticalPackageTile(Tile):
     def __init__(self, pkginfo, icon, installer):
@@ -1030,7 +1070,7 @@ class Application(Gtk.Application):
                                        Gtk.DialogFlags.MODAL,
                                        Gtk.MessageType.WARNING,
                                        Gtk.ButtonsType.YES_NO,
-                                       _("There are currently active operations.  Are you sure you want to quit?"))
+                                       _("There are currently active operations.\nAre you sure you want to quit?"))
             res = dialog.run()
             dialog.destroy()
             if res == Gtk.ResponseType.NO:
@@ -1646,6 +1686,7 @@ class Application(Gtk.Application):
 
         tile = PackageTile(pkginfo, icon, summary,
                            installer=self.installer,
+                           review_info=self.review_cache[pkginfo.name],
                            show_more_info=(self.installer.get_display_name(pkginfo).lower() in collisions))
         tile.connect("clicked", self.on_flowbox_item_clicked, pkginfo.pkg_hash)
 
