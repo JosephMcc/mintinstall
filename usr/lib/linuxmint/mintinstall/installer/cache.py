@@ -198,8 +198,7 @@ class PkgCache(object):
         # Depickling later may fail if we _load_cache from a different context or module.
         # This explicitly stores the module name PkgInfo is defined in, within the pickle
         # file.
-        PkgInfo.__module__ = "xapp.pkgCache.pkgInfo"
-        # PickleObject.__module__ = "xapp.pkgCache.cache"
+        PkgInfo.__module__ = "installer.pkgInfo"
 
         try:
             with path.open(mode='wb') as f:

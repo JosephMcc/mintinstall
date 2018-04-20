@@ -404,19 +404,13 @@ class Installer:
         print("Done with task (success)", task.pkginfo.pkg_hash)
         del self.tasks[task.pkginfo.pkg_hash]
 
-        if len(self.tasks.keys()) == 0:
-            self._post_task_update(task)
-        else:
-            self._run_client_callback(task)
+        self._post_task_update(task)
 
     def _task_error(self, task):
         print("Done with task (error)", task.pkginfo.pkg_hash)
         del self.tasks[task.pkginfo.pkg_hash]
 
-        if len(self.tasks.keys()) == 0:
-            self._post_task_update(task)
-        else:
-            self._run_client_callback(task)
+        self._post_task_update(task)
 
     def _post_task_update(self, task):
         if task.pkginfo.pkg_hash.startswith("a"):
