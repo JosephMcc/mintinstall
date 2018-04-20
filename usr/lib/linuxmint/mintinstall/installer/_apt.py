@@ -296,7 +296,7 @@ class MetaTransaction():
         if self.task.has_window:
             self.apt_transaction.connect("progress-changed", self.on_transaction_progress)
             self.apt_transaction.connect("error", self.on_transaction_error)
-            self.apt_transaction.run(reply_handler=lambda x: print("sddsd"), error_handler=self._on_error)
+            self.apt_transaction.run(reply_handler=lambda: None, error_handler=self._on_error)
         else:
             progress_window = AptProgressDialog(self.apt_transaction)
             progress_window.run(show_error=False, error_handler=self._on_error)
