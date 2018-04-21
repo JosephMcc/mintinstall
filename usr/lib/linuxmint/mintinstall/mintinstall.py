@@ -810,8 +810,8 @@ class Application(Gtk.Application):
 
         self.installed_menuitem.set_sensitive(sensitive)
 
-        visible = self.current_category != None and self.page_stack.get_visible_child_name() == self.PAGE_LIST
-        self.subsearch_toggle.set_visible(visible)
+        sensitive = self.current_category != None and self.page_stack.get_visible_child_name() == self.PAGE_LIST
+        self.subsearch_toggle.set_sensitive(sensitive)
 
     def update_activity_widgets(self):
         num_tasks = self.installer.get_task_count()
